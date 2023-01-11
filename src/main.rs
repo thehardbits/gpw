@@ -1,15 +1,14 @@
-#![deny(warnings)]
-
 use clap::Parser;
-use h3ron::H3Cell;
-use h3ron::Index;
-use hexset::HexMap;
-use hyper::service::{make_service_fn, service_fn};
-use hyper::{body::Body, StatusCode};
-use hyper::{Error, Response, Server};
-use std::fs::File;
-use std::io::BufReader;
-use std::sync::Arc;
+use hextree::{
+    h3ron::{H3Cell, Index},
+    HexTreeMap,
+};
+use hyper::{
+    body::Body,
+    service::{make_service_fn, service_fn},
+    Error, Response, Server, StatusCode,
+};
+use std::{fs::File, io::BufReader, sync::Arc};
 
 /// Search for a pattern in a file and display the lines that contain it.
 #[derive(Parser)]
@@ -22,13 +21,9 @@ struct Cli {
 #[tokio::main]
 async fn main() {
     let args = Cli::parse();
-
     let f = BufReader::new(File::open(args.path).unwrap());
-
-    let map: HexMap<f64> = bincode::deserialize_from(f).unwrap();
+    let map: HexTreeMap<f64> = bincode::deserialize_from(f).unwrap();
     let map = Arc::new(map);
-
-    let addr = ([127, 0, 0, 1], 3000).into();
 
     let make_service = make_service_fn(move |_| {
         let map = map.clone();
@@ -39,7 +34,7 @@ async fn main() {
             Ok::<_, Error>(service_fn(move |req| {
                 let path = req.uri().path();
                 let h3idx = u64::from_str_radix(&path[1..], 16).unwrap();
-                let result = map.get(&H3Cell::new(h3idx)).cloned();
+                let result = map.get(H3Cell::new(h3idx)).cloned();
                 async move {
                     match result {
                         Some(pop) => {
@@ -56,6 +51,7 @@ async fn main() {
         }
     });
 
+    let addr = ([127, 0, 0, 1], 3000).into();
     let server = Server::bind(&addr).serve(make_service);
 
     println!("Listening on http://{}", addr);
@@ -73,7 +69,7 @@ use clap::Parser;
 
 use bincode::deserialize_from;
 
-use hexset::HexMap;
+use hexset::HexTreeMap;
 use h3ron::H3Cell;
 use h3ron::Index;
 
@@ -96,7 +92,7 @@ fn main() {
     let mut f = BufReader::new(File::open(args.path).unwrap());
     let t2 = std::time::Instant::now();
 
-    let map: HexMap<f64> = bincode::deserialize_from(f).unwrap();
+    let map: HexTreeMap<f64> = bincode::deserialize_from(f).unwrap();
     let t3 = std::time::Instant::now();
 
     let result = map.get(&H3Cell::new(args.pattern));
