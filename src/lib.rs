@@ -1,27 +1,17 @@
-use std::fs;
+use geo::Polygon;
+use hextree::h3ron::{self, H3Cell, Index};
+use std::collections::HashMap;
 use std::fs::File;
 use std::io;
 use std::io::prelude::*;
 use std::io::BufReader;
-use std::io::BufWriter;
-
-use bincode::serialize_into;
-
-use std::collections::HashMap;
-
-use rayon::prelude::*;
-
-use geo::Polygon;
-use hexset::h3ron::H3Cell;
-use hexset::h3ron::Index;
-use hexset::HexMap;
 
 use geo::coord;
 use geo::line_string;
 use geo::Coordinate;
 use num_traits::Zero;
 
-fn parse_asc(name: String) -> io::Result<HashMap<H3Cell, f64>> {
+pub fn parse_asc(name: String) -> io::Result<HashMap<H3Cell, f64>> {
     let file = File::open(name).expect("file not found!");
     let buf_reader = BufReader::new(file);
 
@@ -34,15 +24,15 @@ fn parse_asc(name: String) -> io::Result<HashMap<H3Cell, f64>> {
     let mut nodata = "-1".to_string();
     let mut header_done = false;
     let mut col = 0;
-    let mut row = 0;
+    // let mut row = 0;
 
-    //let mut hexmap = HexMap::new();
+    //let mut hexmap = HexTreeMap::new();
     let mut map = HashMap::new();
 
     for line in buf_reader.lines() {
         let line = line?;
         let mut tokens = line.split_whitespace();
-        if header_done == true {
+        if header_done {
             for valstr in tokens {
                 if valstr != nodata && valstr != "0" {
                     let val = valstr.parse::<f64>().unwrap();
@@ -70,7 +60,7 @@ fn parse_asc(name: String) -> io::Result<HashMap<H3Cell, f64>> {
                 pos = pos + offset;
                 if col >= ncols {
                     col = 0;
-                    row += 1;
+                    // row += 1;
                     pos = coord! { x: xllcorner, y: pos.y - cellsize};
                 }
             }
@@ -103,13 +93,12 @@ fn parse_asc(name: String) -> io::Result<HashMap<H3Cell, f64>> {
     // average them
     for hex in map.keys() {
         let parent = hex.get_parent(8).unwrap();
-        if output.contains_key(&parent) == false {
+        if !output.contains_key(&parent) {
             let children = parent.get_children(10).unwrap();
             let mut population_sum = 0.0;
             for child in children.iter() {
-                match map.get(&child) {
-                    Some(pop) => population_sum += pop,
-                    None => (),
+                if let Some(pop) = map.get(&child) {
+                    population_sum += pop
                 }
             }
             let population = population_sum / children.count() as f64;
@@ -117,7 +106,7 @@ fn parse_asc(name: String) -> io::Result<HashMap<H3Cell, f64>> {
         }
     }
 
-    return Ok(output);
+    Ok(output)
 }
 
 #[cfg(test)]
@@ -176,7 +165,7 @@ mod tests {
                         .unwrap()
             });
         });
-        let mut popmap = HexMap::new();
+        let mut popmap = HexTreeMap::new();
         for (cell, pop) in res1
             .into_iter()
             .chain(res2)
