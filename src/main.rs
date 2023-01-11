@@ -1,14 +1,11 @@
 use clap::Parser;
-use hextree::{
-    h3ron::{H3Cell, Index},
-    HexTreeMap,
-};
+use hextree::{h3ron::H3Cell, HexTreeMap};
 use hyper::{
     body::Body,
     service::{make_service_fn, service_fn},
     Error, Response, Server, StatusCode,
 };
-use std::{fs::File, io::BufReader, sync::Arc};
+use std::{convert::TryFrom, fs::File, io::BufReader, sync::Arc};
 
 /// Search for a pattern in a file and display the lines that contain it.
 #[derive(Parser)]
@@ -25,18 +22,18 @@ async fn main() {
     let map: HexTreeMap<f64> = bincode::deserialize_from(f).unwrap();
     let map = Arc::new(map);
 
+    #[forbid(clippy::unwrap_used)]
     let make_service = make_service_fn(move |_| {
         let map = map.clone();
         async move {
-            // This is the `Service` that will handle the connection.
-            // `service_fn` is a helper to convert a function that
-            // returns a Response into a `Service`.
             Ok::<_, Error>(service_fn(move |req| {
                 let path = req.uri().path();
-                let h3idx = u64::from_str_radix(&path[1..], 16).unwrap();
-                let result = map.get(H3Cell::new(h3idx)).cloned();
+                let population = u64::from_str_radix(&path[1..], 16)
+                    .ok()
+                    .and_then(|index| H3Cell::try_from(index).ok())
+                    .and_then(|cell| map.get(cell).cloned());
                 async move {
-                    match result {
+                    match population {
                         Some(pop) => {
                             Ok::<_, Error>(Response::new(Body::from(format!("{:?}", pop))))
                         }
