@@ -93,7 +93,7 @@ pub fn parse_asc(name: String) -> io::Result<HashMap<H3Cell, f64>> {
     // average them
     for hex in map.keys() {
         let parent = hex.get_parent(8).unwrap();
-        if output.contains_key(&parent) {
+        if !output.contains_key(&parent) {
             let children = parent.get_children(10).unwrap();
             let mut population_sum = 0.0;
             for child in children.iter() {
