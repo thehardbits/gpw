@@ -503,8 +503,7 @@ dependencies = [
 [[package]]
 name = "hextree"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b441cd933ac3eadde9f01898ef12bb3d4560fbe1aeaf3eb2e5bff5bdd7715a17"
+source = "git+https://github.com/JayKickliter/HexTree.git?rev=ca7d1dac68fc01a1b0bfe48f6481cb23d9d23b28#ca7d1dac68fc01a1b0bfe48f6481cb23d9d23b28"
 dependencies = [
  "h3ron",
  "serde",
