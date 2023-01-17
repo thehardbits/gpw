@@ -3,10 +3,11 @@
 use geo::{coord, line_string, Coordinate, Polygon};
 use hextree::h3ron::{self, H3Cell, Index};
 use num_traits::Zero;
+use rayon::prelude::*;
 use std::{
     collections::HashMap,
     fs::File,
-    io::{self, BufRead, BufReader, Lines},
+    io::{self, BufRead, BufReader, BufWriter, Lines, Write},
 };
 
 // $ head -n6    gpw_v4_population_count_rev11_2020_30_sec_1.asc
@@ -17,7 +18,7 @@ use std::{
 // cellsize      0.0083333333333333
 // NODATA_value  -9999
 #[derive(Debug, Clone, PartialEq, Default)]
-struct GpwAsciiHeader {
+pub struct GpwAsciiHeader {
     ncols: usize,
     nrows: usize,
     xllcorner: f32,
@@ -27,7 +28,7 @@ struct GpwAsciiHeader {
 }
 
 #[derive(Debug)]
-enum GpwError {
+pub enum GpwError {
     Io(io::Error),
     /// Generic parsing error
     Parse(&'static str, Option<Box<dyn std::fmt::Debug>>),
@@ -46,7 +47,7 @@ impl<E: std::fmt::Debug + 'static> From<(&'static str, E)> for GpwError {
 }
 
 impl GpwAsciiHeader {
-    fn parse<R: std::io::Read>(rdr: &mut BufReader<R>) -> Result<Self, GpwError> {
+    pub fn parse<R: std::io::Read>(rdr: &mut BufReader<R>) -> Result<Self, GpwError> {
         let mut ncols: Option<usize> = None;
         let mut nrows: Option<usize> = None;
         let mut xllcorner: Option<f32> = None;
@@ -144,14 +145,14 @@ impl GpwAsciiHeader {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-struct GpwAscii {
+pub struct GpwAscii {
     header: GpwAsciiHeader,
     data: Vec<Vec<Option<f32>>>,
     filename: Option<String>,
 }
 
 impl GpwAscii {
-    fn parse<R: std::io::Read>(rdr: &mut BufReader<R>) -> Result<Self, GpwError> {
+    pub fn parse<R: std::io::Read>(rdr: &mut BufReader<R>) -> Result<Self, GpwError> {
         let header = GpwAsciiHeader::parse(rdr)?;
         let mut data = Vec::with_capacity(header.nrows);
         let mut data_line = String::new();
@@ -171,18 +172,46 @@ impl GpwAscii {
                 };
                 row.push(sample);
             }
-            debug_assert_eq!(row.len(), header.ncols);
+            assert_eq!(row.len(), header.ncols);
             row_idx += 1;
             data.push(row);
             data_line.clear();
         }
-        debug_assert_eq!(data.len(), header.nrows);
+        assert_eq!(data.len(), header.nrows);
         Ok(Self {
             header,
             data,
             filename: None,
         })
     }
+}
+
+pub fn gen_to_disk(src: GpwAscii, dst: String) {
+    let (tx, rx) = std::sync::mpsc::channel::<Vec<(u64, f32)>>();
+
+    let handle = std::thread::spawn(move || {
+        let header = &src.header;
+        let data = &src.data;
+        data.into_par_iter()
+            .enumerate()
+            .for_each_with(tx, |tx, (row_idx, row)| {
+                row.par_iter()
+                    .enumerate()
+                    .for_each_with(tx.clone(), |tx, (col_idx, sample)| {
+                        tx.send(vec![(0, 1.0)]);
+                    })
+            })
+    });
+
+    let file = File::create(dst).unwrap();
+    let mut out = BufWriter::new(file);
+    while let Ok(hex_value_pairs) = rx.recv() {
+        for (hex, value) in hex_value_pairs {
+            out.write_all(&hex.to_le_bytes()).unwrap();
+            out.write_all(&value.to_le_bytes()).unwrap();
+        }
+    }
+    handle.join().unwrap();
 }
 
 // pub fn parse_asc(name: String) -> io::Result<HashMap<H3Cell, f64>> {
@@ -312,12 +341,10 @@ NODATA_value  -9999
 -9999 -9999 -9999 -9999
 -9999 -9999 -9999 -9999
 -9999 -9999 -9999 -9999
--9999 -9999 -9999 -9999
+-9999 -9999 0.123 -9999
 "#;
-        let file = File::open("/Volumes/dev/he/gpw/local/gpw-v4-population-count-rev11_2020_30_sec_asc/gpw_v4_population_count_rev11_2020_30_sec_1.asc").unwrap();
-        let mut rdr = BufReader::new(file);
-        let dataset = GpwAscii::parse(&mut rdr).unwrap();
-        println!("{:?}", dataset);
+        let mut rdr = BufReader::new(Cursor::new(file));
+        GpwAscii::parse(&mut rdr).unwrap();
     }
 
     // [test]
