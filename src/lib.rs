@@ -186,7 +186,33 @@ impl GpwAscii {
     }
 }
 
-pub fn gen_to_disk(src: GpwAscii, dst: String) {
+fn tessalate_grid(
+    header: &GpwAsciiHeader,
+    row: usize,
+    col: usize,
+    population: f32,
+) -> Vec<(u64, f32)> {
+    let mut pos: Coordinate = Zero::zero();
+    let cell = Polygon::new(
+        line_string![
+            pos,
+            coord! {x: pos.x + header.cellsize as f64, y: pos.y},
+            coord! {x: pos.x + header.cellsize as f64, y: pos.y - header.cellsize as f64},
+            coord! {x: pos.x, y: pos.y-header.cellsize as f64},
+            pos
+        ],
+        vec![],
+    );
+    // tesselate at res 10 so we can handle the two coordinate systems drifting
+    let hexes = h3ron::polygon_to_cells(&cell, 10).unwrap();
+    hexes
+        .iter()
+        .zip(std::iter::repeat(population))
+        .map(|(hex, val)| (*hex, val))
+        .collect()
+}
+
+pub fn gen_to_disk(src: GpwAscii, dst: &mut impl Write) {
     let (tx, rx) = std::sync::mpsc::channel::<Vec<(u64, f32)>>();
 
     let handle = std::thread::spawn(move || {
@@ -198,17 +224,18 @@ pub fn gen_to_disk(src: GpwAscii, dst: String) {
                 row.par_iter()
                     .enumerate()
                     .for_each_with(tx.clone(), |tx, (col_idx, sample)| {
-                        tx.send(vec![(0, 1.0)]);
+                        if let Some(val) = sample {
+                            let hex_value_pairs = tessalate_grid(header, row_idx, col_idx, *val);
+                            tx.send(hex_value_pairs).unwrap();
+                        }
                     })
             })
     });
 
-    let file = File::create(dst).unwrap();
-    let mut out = BufWriter::new(file);
     while let Ok(hex_value_pairs) = rx.recv() {
         for (hex, value) in hex_value_pairs {
-            out.write_all(&hex.to_le_bytes()).unwrap();
-            out.write_all(&value.to_le_bytes()).unwrap();
+            dst.write_all(&hex.to_le_bytes()).unwrap();
+            dst.write_all(&value.to_le_bytes()).unwrap();
         }
     }
     handle.join().unwrap();
@@ -345,6 +372,25 @@ NODATA_value  -9999
 "#;
         let mut rdr = BufReader::new(Cursor::new(file));
         GpwAscii::parse(&mut rdr).unwrap();
+    }
+
+    #[test]
+    fn test_gen_to_disk() {
+        let file = r#"ncols         4
+nrows         4
+xllcorner     -180
+yllcorner     -4.2632564145606e-14
+cellsize      0.0083333333333333
+NODATA_value  -9999
+-9999 -9999 -9999 -9999
+-9999 -9999 -9999 -9999
+-9999 -9999 -9999 -9999
+-9999 -9999 0.123 -9999
+"#;
+        let mut rdr = BufReader::new(Cursor::new(file));
+        let data = GpwAscii::parse(&mut rdr).unwrap();
+        let mut dst = BufWriter::new(File::create("/Users/jay/he/gpw/out.indicies").unwrap());
+        gen_to_disk(data, &mut dst);
     }
 
     // [test]
