@@ -1,14 +1,7 @@
-#![allow(unused_imports)]
-
-use geo::{coord, line_string, Coordinate, Polygon};
-use hextree::h3ron::{self, H3Cell, Index};
-use num_traits::Zero;
+use geo::{coord, line_string, Polygon};
+use hextree::h3ron;
 use rayon::prelude::*;
-use std::{
-    collections::HashMap,
-    fs::File,
-    io::{self, BufRead, BufReader, BufWriter, Lines, Write},
-};
+use std::io::{self, BufRead, BufReader, Write};
 
 // $ head -n6    gpw_v4_population_count_rev11_2020_30_sec_1.asc
 // ncols         10800
@@ -21,9 +14,9 @@ use std::{
 pub struct GpwAsciiHeader {
     ncols: usize,
     nrows: usize,
-    xllcorner: f32,
-    yllcorner: f32,
-    cellsize: f32,
+    xllcorner: f64,
+    yllcorner: f64,
+    cellsize: f64,
     nodata_value: String,
 }
 
@@ -50,9 +43,9 @@ impl GpwAsciiHeader {
     pub fn parse<R: std::io::Read>(rdr: &mut BufReader<R>) -> Result<Self, GpwError> {
         let mut ncols: Option<usize> = None;
         let mut nrows: Option<usize> = None;
-        let mut xllcorner: Option<f32> = None;
-        let mut yllcorner: Option<f32> = None;
-        let mut cellsize: Option<f32> = None;
+        let mut xllcorner: Option<f64> = None;
+        let mut yllcorner: Option<f64> = None;
+        let mut cellsize: Option<f64> = None;
         let mut nodata_value: Option<String> = None;
 
         for _ in 0..6 {
@@ -84,7 +77,7 @@ impl GpwAsciiHeader {
                             tokens
                                 .next()
                                 .ok_or(GpwError::Parse("xllcorner", None))?
-                                .parse::<f32>()
+                                .parse::<f64>()
                                 .map_err(|e| ("xllcorner", e))?,
                         );
                     }
@@ -93,7 +86,7 @@ impl GpwAsciiHeader {
                             tokens
                                 .next()
                                 .ok_or(GpwError::Parse("yllcorner", None))?
-                                .parse::<f32>()
+                                .parse::<f64>()
                                 .map_err(|e| ("yllcorner", e))?,
                         );
                     }
@@ -102,7 +95,7 @@ impl GpwAsciiHeader {
                             tokens
                                 .next()
                                 .ok_or(GpwError::Parse("cellsize", None))?
-                                .parse::<f32>()
+                                .parse::<f64>()
                                 .map_err(|e| ("cellsize", e))?,
                         );
                     }
@@ -186,34 +179,35 @@ impl GpwAscii {
     }
 }
 
-fn tessalate_grid(
-    header: &GpwAsciiHeader,
-    row: usize,
-    col: usize,
-    population: f32,
-) -> Vec<(u64, f32)> {
-    let mut pos: Coordinate = Zero::zero();
-    let cell = Polygon::new(
+fn tessalate_grid(header: &GpwAsciiHeader, row: usize, col: usize) -> Vec<u64> {
+    let grid_bottom_degs = header.yllcorner + header.cellsize * (header.nrows - row + 1) as f64;
+    let grid_top_degs = grid_bottom_degs + header.cellsize;
+    let grid_left_degs = header.xllcorner + header.cellsize * col as f64;
+    let grid_right_degs = grid_left_degs + header.cellsize;
+
+    let grid_cell_poly = Polygon::new(
         line_string![
-            pos,
-            coord! {x: pos.x + header.cellsize as f64, y: pos.y},
-            coord! {x: pos.x + header.cellsize as f64, y: pos.y - header.cellsize as f64},
-            coord! {x: pos.x, y: pos.y-header.cellsize as f64},
-            pos
+            // lower-left
+            coord! {x: grid_left_degs, y: grid_bottom_degs},
+            // lower-right
+            coord! {x: grid_right_degs, y: grid_bottom_degs},
+            // upper-right
+            coord! {x: grid_right_degs, y: grid_top_degs},
+            // upper-left
+            coord! {x: grid_left_degs, y: grid_top_degs},
+            // lower-left
+            coord! {x: grid_left_degs, y: grid_bottom_degs}
         ],
         vec![],
     );
-    // tesselate at res 10 so we can handle the two coordinate systems drifting
-    let hexes = h3ron::polygon_to_cells(&cell, 10).unwrap();
-    hexes
-        .iter()
-        .zip(std::iter::repeat(population))
-        .map(|(hex, val)| (*hex, val))
-        .collect()
+    // Tesselate at res 10 so we can handle the two coordinate systems
+    // drifting.
+    let hexes = h3ron::polygon_to_cells(&grid_cell_poly, 10).unwrap();
+    hexes.iter().map(|hex| *hex).collect()
 }
 
 pub fn gen_to_disk(src: GpwAscii, dst: &mut impl Write) {
-    let (tx, rx) = std::sync::mpsc::channel::<Vec<(u64, f32)>>();
+    let (tx, rx) = std::sync::mpsc::channel::<(Vec<u64>, f32)>();
 
     let handle = std::thread::spawn(move || {
         let header = &src.header;
@@ -225,124 +219,31 @@ pub fn gen_to_disk(src: GpwAscii, dst: &mut impl Write) {
                     .enumerate()
                     .for_each_with(tx.clone(), |tx, (col_idx, sample)| {
                         if let Some(val) = sample {
-                            let hex_value_pairs = tessalate_grid(header, row_idx, col_idx, *val);
-                            tx.send(hex_value_pairs).unwrap();
+                            let h3_indicies = tessalate_grid(header, row_idx, col_idx);
+                            tx.send((h3_indicies, *val)).unwrap();
                         }
                     })
             })
     });
 
-    while let Ok(hex_value_pairs) = rx.recv() {
-        for (hex, value) in hex_value_pairs {
-            dst.write_all(&hex.to_le_bytes()).unwrap();
-            dst.write_all(&value.to_le_bytes()).unwrap();
+    while let Ok((h3_indicies, val)) = rx.recv() {
+        let scaled_val = val / h3_indicies.len() as f32;
+        let scaled_val_bytes = scaled_val.to_le_bytes();
+        for h3_index in h3_indicies {
+            dst.write_all(&h3_index.to_le_bytes()).unwrap();
+            dst.write_all(&scaled_val_bytes).unwrap();
         }
     }
     handle.join().unwrap();
 }
 
-// pub fn parse_asc(name: String) -> io::Result<HashMap<H3Cell, f64>> {
-//     let file = File::open(name).expect("file not found!");
-//     let buf_reader = BufReader::new(file);
-
-//     let mut ncols = 0;
-//     let mut nrows = 0;
-//     let mut xllcorner = 0.0;
-//     let mut yllcorner = 0.0;
-//     let mut pos: Coordinate = Zero::zero();
-//     let mut cellsize = 0.0;
-//     let mut nodata = "-1".to_string();
-//     let mut header_done = false;
-//     let mut col = 0;
-//     // let mut row = 0;
-
-//     //let mut hexmap = HexTreeMap::new();
-//     let mut map = HashMap::new();
-
-//     for line in buf_reader.lines() {
-//         let line = line?;
-//         let mut tokens = line.split_whitespace();
-//         if header_done {
-//             for valstr in tokens {
-//                 if valstr != nodata && valstr != "0" {
-//                     let val = valstr.parse::<f64>().unwrap();
-//                     // compute the 4 corners of the cell
-//                     // clockwise winding order, closed linestring, no interior ring
-//                     let cell = Polygon::new(
-//                         line_string![
-//                             pos,
-//                             coord! {x: pos.x + cellsize, y: pos.y},
-//                             coord! {x: pos.x + cellsize, y: pos.y - cellsize},
-//                             coord! {x: pos.x, y: pos.y-cellsize},
-//                             pos
-//                         ],
-//                         vec![],
-//                     );
-//                     // tesselate at res 10 so we can handle the two coordinate systems drifting
-//                     let hexes = h3ron::polygon_to_cells(&cell, 10);
-
-//                     for hex in hexes.unwrap().iter() {
-//                         map.insert(H3Cell::new(*hex), val);
-//                     }
-//                 }
-//                 col += 1;
-//                 let offset = coord! { x: cellsize, y: 0.0};
-//                 pos = pos + offset;
-//                 if col >= ncols {
-//                     col = 0;
-//                     // row += 1;
-//                     pos = coord! { x: xllcorner, y: pos.y - cellsize};
-//                 }
-//             }
-//         } else {
-//             let key = tokens.next();
-//             if key == Some("ncols") {
-//                 ncols = tokens.next().unwrap().parse::<u64>().unwrap();
-//             } else if key == Some("nrows") {
-//                 nrows = tokens.next().unwrap().parse::<u64>().unwrap();
-//             } else if key == Some("xllcorner") {
-//                 xllcorner = tokens.next().unwrap().parse::<f64>().unwrap();
-//             } else if key == Some("yllcorner") {
-//                 yllcorner = tokens.next().unwrap().parse::<f64>().unwrap();
-//             } else if key == Some("cellsize") {
-//                 cellsize = tokens.next().unwrap().parse::<f64>().unwrap();
-//             } else if key == Some("NODATA_value") {
-//                 nodata = tokens.next().unwrap().to_string();
-//                 header_done = true;
-//                 pos = coord! { x: xllcorner,
-//                 y: yllcorner + (cellsize * nrows as f64)};
-//                 println!("start is {:?}", pos);
-//             }
-//         }
-//     }
-
-//     let mut output = HashMap::new();
-//     // compact the hexes back up to res 8
-//     // fold each key in the map, find the parent at res 8, then find all the res 10 children
-//     // then for each of the children, look for their population densities (or 0 if not found) and
-//     // average them
-//     for hex in map.keys() {
-//         let parent = hex.get_parent(8).unwrap();
-//         if !output.contains_key(&parent) {
-//             let children = parent.get_children(10).unwrap();
-//             let mut population_sum = 0.0;
-//             for child in children.iter() {
-//                 if let Some(pop) = map.get(&child) {
-//                     population_sum += pop
-//                 }
-//             }
-//             let population = population_sum / children.count() as f64;
-//             output.insert(parent, population);
-//         }
-//     }
-
-//     Ok(output)
-// }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Cursor;
+    use std::{
+        fs::File,
+        io::{BufWriter, Cursor},
+    };
 
     #[test]
     fn test_parse_header() {
@@ -392,75 +293,4 @@ NODATA_value  -9999
         let mut dst = BufWriter::new(File::create("/Users/jay/he/gpw/out.indicies").unwrap());
         gen_to_disk(data, &mut dst);
     }
-
-    // [test]
-    // fn test_parse() {
-    //     println!("cwd {:?}", std::env::current_dir());
-    //     let mut res1: HashMap<H3Cell, f64> = HashMap::new();
-    //     let mut res2: HashMap<H3Cell, f64> = HashMap::new();
-    //     let mut res3: HashMap<H3Cell, f64> = HashMap::new();
-    //     let mut res4: HashMap<H3Cell, f64> = HashMap::new();
-    //     let mut res5: HashMap<H3Cell, f64> = HashMap::new();
-    //     let mut res6: HashMap<H3Cell, f64> = HashMap::new();
-    //     let mut res7: HashMap<H3Cell, f64> = HashMap::new();
-    //     let mut res8: HashMap<H3Cell, f64> = HashMap::new();
-    //     rayon::scope(|s| {
-    //         s.spawn(|_| {
-    //             res1 =
-    //                 parse_asc("data/gpw_v4_population_density_rev11_2020_30_sec_1.asc".to_string())
-    //                     .unwrap()
-    //         });
-    //         s.spawn(|_| {
-    //             res2 =
-    //                 parse_asc("data/gpw_v4_population_density_rev11_2020_30_sec_2.asc".to_string())
-    //                     .unwrap()
-    //         });
-    //         s.spawn(|_| {
-    //             res3 =
-    //                 parse_asc("data/gpw_v4_population_density_rev11_2020_30_sec_3.asc".to_string())
-    //                     .unwrap()
-    //         });
-    //         s.spawn(|_| {
-    //             res4 =
-    //                 parse_asc("data/gpw_v4_population_density_rev11_2020_30_sec_4.asc".to_string())
-    //                     .unwrap()
-    //         });
-    //         s.spawn(|_| {
-    //             res5 =
-    //                 parse_asc("data/gpw_v4_population_density_rev11_2020_30_sec_5.asc".to_string())
-    //                     .unwrap()
-    //         });
-    //         s.spawn(|_| {
-    //             res6 =
-    //                 parse_asc("data/gpw_v4_population_density_rev11_2020_30_sec_6.asc".to_string())
-    //                     .unwrap()
-    //         });
-    //         s.spawn(|_| {
-    //             res7 =
-    //                 parse_asc("data/gpw_v4_population_density_rev11_2020_30_sec_7.asc".to_string())
-    //                     .unwrap()
-    //         });
-    //         s.spawn(|_| {
-    //             res8 =
-    //                 parse_asc("data/gpw_v4_population_density_rev11_2020_30_sec_8.asc".to_string())
-    //                     .unwrap()
-    //         });
-    //     });
-    //     let mut popmap = HexTreeMap::new();
-    //     for (cell, pop) in res1
-    //         .into_iter()
-    //         .chain(res2)
-    //         .chain(res3)
-    //         .chain(res4)
-    //         .chain(res5)
-    //         .chain(res6)
-    //         .chain(res7)
-    //         .chain(res8)
-    //     {
-    //         popmap.insert(cell, pop);
-    //     }
-
-    //     let mut f = BufWriter::new(File::create("/tmp/foo.bar").unwrap());
-    //     serialize_into(&mut f, &popmap);
-    // }
 }
