@@ -13,6 +13,9 @@ description = """
 Generate H3Set data using the "Gridded Population of the World (GPW), v4" dataset (https://sedac.ciesin.columbia.edu/data/set/gpw-v4-population-density-rev11).
 """
 
+[profile.release]
+debug = true
+
 [dependencies]
 bincode = "1.3.3"
 bytes = "1.3.0"
