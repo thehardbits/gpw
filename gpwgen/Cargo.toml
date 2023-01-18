@@ -12,6 +12,8 @@ name = "gpwgen"
 path = "src/main.rs"
 
 [dependencies]
+anyhow = "*"
+byteorder = "*"
 clap = {version = "*", features = ["derive"]}
 geo = "*"
 hextree = "*"
