@@ -1,4 +1,8 @@
+#![deny(clippy::unwrap_used)]
+
 mod options;
+use anyhow::Result;
+use byteorder::{LittleEndian as LE, ReadBytesExt};
 use clap::Parser;
 use hextree::{h3ron::H3Cell, HexTreeMap};
 use hyper::{
@@ -6,16 +10,20 @@ use hyper::{
     service::{make_service_fn, service_fn},
     Error, Response, Server, StatusCode,
 };
-use std::{convert::TryFrom, fs::File, io::BufReader, sync::Arc};
+use std::{
+    convert::TryFrom,
+    fs::File,
+    io::{BufReader, ErrorKind, Read},
+    sync::Arc,
+};
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<()> {
     let args = options::Cli::parse();
-    let f = BufReader::new(File::open(args.path).unwrap());
-    let map: HexTreeMap<f64> = bincode::deserialize_from(f).unwrap();
+    let f = BufReader::new(File::open(args.path)?);
+    let map: HexTreeMap<f32> = deserialize_hexmap(f)?;
     let map = Arc::new(map);
 
-    #[forbid(clippy::unwrap_used)]
     let make_service = make_service_fn(move |_| {
         let map = map.clone();
         async move {
@@ -46,7 +54,26 @@ async fn main() {
 
     println!("Listening on http://{}", addr);
 
-    if let Err(e) = server.await {
-        eprintln!("server error: {}", e);
+    server.await?;
+    Ok(())
+}
+
+fn deserialize_hexmap(mut rdr: impl Read) -> Result<HexTreeMap<f32>> {
+    let mut map = HexTreeMap::new();
+    loop {
+        match (rdr.read_u64::<LE>(), rdr.read_f32::<LE>()) {
+            (Ok(h3_index), Ok(val)) => {
+                let cell = H3Cell::try_from(h3_index)?;
+                map.insert(cell, val)
+            }
+            (Err(e), _) if e.kind() == ErrorKind::UnexpectedEof => break,
+            (err @ Err(_), _) => {
+                err?;
+            }
+            (_, err @ Err(_)) => {
+                err?;
+            }
+        };
     }
+    Ok(map)
 }
