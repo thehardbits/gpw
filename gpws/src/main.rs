@@ -1,3 +1,4 @@
+mod options;
 use clap::Parser;
 use hextree::{h3ron::H3Cell, HexTreeMap};
 use hyper::{
@@ -7,17 +8,9 @@ use hyper::{
 };
 use std::{convert::TryFrom, fs::File, io::BufReader, sync::Arc};
 
-/// Search for a pattern in a file and display the lines that contain it.
-#[derive(Parser)]
-struct Cli {
-    /// The path to the file to read
-    #[clap(parse(from_os_str))]
-    path: std::path::PathBuf,
-}
-
 #[tokio::main]
 async fn main() {
-    let args = Cli::parse();
+    let args = options::Cli::parse();
     let f = BufReader::new(File::open(args.path).unwrap());
     let map: HexTreeMap<f64> = bincode::deserialize_from(f).unwrap();
     let map = Arc::new(map);

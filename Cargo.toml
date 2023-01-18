@@ -1,29 +1,8 @@
-[package]
-name = "h3_gpd"
-version = "0.1.0"
-authors = ["Andrew Thompson <andrew@hijacked.us>"]
-categories = ["science", "data-structures"]
-edition = "2018"
-exclude = ["/test/*"]
-readme = "README.md"
-keywords = ["geo", "geography", "geospatial", "gis", "h3", "population"]
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/Vagabond/h3_gpd"
-description = """
-Generate H3Set data using the "Gridded Population of the World (GPW), v4" dataset (https://sedac.ciesin.columbia.edu/data/set/gpw-v4-population-density-rev11).
-"""
+[workspace]
+members = [
+    "gpwgen",
+    "gpws",
+]
 
 [profile.release]
 debug = true
-
-[dependencies]
-bincode = "1.3.3"
-bytes = "1.3.0"
-clap = {version = "3.2.20", features = ["derive"]}
-geo = "0.23.0"
-hextree = {git = "https://github.com/JayKickliter/HexTree.git", rev = "ca7d1dac68fc01a1b0bfe48f6481cb23d9d23b28", features = ["serde-support"]}
-http-body-util = "0.1.0-rc.2"
-hyper = {version = "0.14.23", features = ["server", "http1", "full"]}
-num-traits = "0.2.15"
-rayon = "1.6.1"
-tokio = {version = "1.24.1", features = ["full"]}
