@@ -5,7 +5,7 @@ use rayon::prelude::*;
 use std::io::Write;
 
 pub fn tessalate_grid(header: &GpwAsciiHeader, row: usize, col: usize) -> Vec<u64> {
-    let grid_bottom_degs = header.yllcorner + header.cellsize * (header.nrows - row + 1) as f64;
+    let grid_bottom_degs = header.yllcorner + header.cellsize * (header.nrows - row - 1) as f64;
     let grid_top_degs = grid_bottom_degs + header.cellsize;
     let grid_left_degs = header.xllcorner + header.cellsize * col as f64;
     let grid_right_degs = grid_left_degs + header.cellsize;
