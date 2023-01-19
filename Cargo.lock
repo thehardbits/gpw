@@ -349,7 +349,7 @@ dependencies = [
  "byteorder",
  "clap",
  "geo",
- "hextree",
+ "hextree 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "rayon",
 ]
 
@@ -361,7 +361,7 @@ dependencies = [
  "bincode",
  "byteorder",
  "clap",
- "hextree",
+ "hextree 0.1.0 (git+https://github.com/JayKickliter/HexTree.git?rev=38d4b1384baccc02de946e084f76ccfb591792e9)",
  "hyper",
  "indicatif",
  "tokio",
@@ -463,6 +463,14 @@ name = "hextree"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b441cd933ac3eadde9f01898ef12bb3d4560fbe1aeaf3eb2e5bff5bdd7715a17"
+dependencies = [
+ "h3ron",
+]
+
+[[package]]
+name = "hextree"
+version = "0.1.0"
+source = "git+https://github.com/JayKickliter/HexTree.git?rev=38d4b1384baccc02de946e084f76ccfb591792e9#38d4b1384baccc02de946e084f76ccfb591792e9"
 dependencies = [
  "h3ron",
 ]
