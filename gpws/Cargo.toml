@@ -10,4 +10,5 @@ byteorder = "*"
 clap = {version = "*", features = ["derive"]}
 hextree = "*"
 hyper = {version = "*", features = ["server", "http1", "full"]}
+indicatif = "*"
 tokio = {version = "*", features = ["full"]}
