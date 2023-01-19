@@ -1,0 +1,20 @@
+[package]
+name = "gpwgen"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "gpwgen"
+path = "src/lib.rs"
+
+[[bin]]
+name = "gpwgen"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "*"
+byteorder = "*"
+clap = {version = "*", features = ["derive"]}
+geo = "*"
+hextree = "*"
+rayon = "*"
