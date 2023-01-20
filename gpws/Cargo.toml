@@ -12,3 +12,6 @@ hextree = {git = "https://github.com/JayKickliter/HexTree.git", rev = "38d4b1384
 hyper = {version = "*", features = ["server", "http1", "full"]}
 indicatif = "*"
 tokio = {version = "*", features = ["full"]}
+
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemallocator = "0.5"
